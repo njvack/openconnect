@@ -1055,6 +1055,26 @@ static int run_hip_script(struct openconnect_info *vpninfo)
 #endif /* !_WIN32 && !__native_client__ */
 }
 
+/* Delay before retrying the Nth consecutive failed HIP recheck: doubles from
+ * GP_HIP_RETRY_MIN up to GP_HIP_RETRY_MAX, and never more than the regular
+ * recheck interval.
+ */
+#define GP_HIP_RETRY_MIN 10
+#define GP_HIP_RETRY_MAX 300
+
+static int hip_retry_delay(struct openconnect_info *vpninfo, int failures)
+{
+	int delay = GP_HIP_RETRY_MIN;
+
+	while (--failures > 0 && delay < GP_HIP_RETRY_MAX)
+		delay *= 2;
+	if (delay > GP_HIP_RETRY_MAX)
+		delay = GP_HIP_RETRY_MAX;
+	if (vpninfo->trojan_interval > 0 && delay > vpninfo->trojan_interval)
+		delay = vpninfo->trojan_interval;
+	return delay;
+}
+
 static int check_and_maybe_submit_hip_report(struct openconnect_info *vpninfo)
 {
 	int ret;
@@ -1094,6 +1114,7 @@ int gpst_setup(struct openconnect_info *vpninfo)
 	 * when periodic re-checking is required.
 	 */
 	vpninfo->last_trojan = time(NULL);
+	vpninfo->trojan_failures = 0;
 
 	/* Default HIP re-checking to 3600 seconds unless already set by
 	 * --force-trojan or portal config.
@@ -1305,15 +1326,44 @@ int gpst_mainloop(struct openconnect_info *vpninfo, int *timeout, int readable)
 		 */
 		openconnect_close_https(vpninfo, 0);
 		ret = check_and_maybe_submit_hip_report(vpninfo);
-		if (ret) {
+		if (ret == -EPERM) {
+			/* The gateway rejected our cookie; retrying won't help. */
 			vpn_progress(vpninfo, PRG_ERR, _("HIP check or report failed\n"));
 			vpninfo->quit_reason = "HIP check or report failed";
 			return ret;
+		} else if (ret) {
+			/* Anything else (an HTTP error, a timeout, a failing HIP
+			 * script) is likely transient. Keep the tunnel up and try
+			 * again after a backoff, rather than ending the session.
+			 */
+			int delay = hip_retry_delay(vpninfo, ++vpninfo->trojan_failures);
+
+			vpn_progress(vpninfo, PRG_ERR,
+				     _("HIP check or report failed (attempt %d); retrying in %d seconds\n"),
+				     vpninfo->trojan_failures, delay);
+			/* trojan_check_deadline() fires at last_trojan + trojan_interval */
+			vpninfo->last_trojan = time(NULL) + delay - vpninfo->trojan_interval;
+		} else {
+			if (vpninfo->trojan_failures)
+				vpn_progress(vpninfo, PRG_INFO,
+					     _("HIP check or report succeeded after %d failed attempt(s)\n"),
+					     vpninfo->trojan_failures);
+			vpninfo->trojan_failures = 0;
 		}
 		/* XX: no need to do_reconnect, since ESP doesn't need reconnection */
-		if ((ret = gpst_connect(vpninfo)))
+		ret = gpst_connect(vpninfo);
+		if (ret == -EPERM) {
 			vpninfo->quit_reason = "GPST connect failed";
-		return ret;
+			return ret;
+		} else if (ret) {
+			/* The HTTPS tunnel didn't come back; do a full reconnect,
+			 * which retries with backoff, instead of giving up. */
+			goto do_reconnect;
+		}
+		/* Wake up in time for the next check (or retry). Without this,
+		 * nothing else may bound the mainloop's sleep. */
+		trojan_check_deadline(vpninfo, timeout);
+		return 0;
 	}
 
 	switch (keepalive_action(&vpninfo->ssl_times, timeout)) {
