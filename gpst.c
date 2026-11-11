@@ -910,6 +910,47 @@ out:
 	return result;
 }
 
+/* Submit a HIP report produced by the script or the handler. */
+static int submit_hip_report(struct openconnect_info *vpninfo, const char *report)
+{
+	int ret = check_or_submit_hip_report(vpninfo, report);
+
+	if (ret < 0) {
+		vpn_progress(vpninfo, PRG_ERR, _("HIP report submission failed.\n"));
+		return ret;
+	}
+	vpn_progress(vpninfo, PRG_INFO, _("HIP report submitted successfully.\n"));
+	return 0;
+}
+
+static int run_hip_handler(struct openconnect_info *vpninfo)
+{
+	struct oc_hip_report_request req = {
+		.md5 = vpninfo->csd_token,
+		.client_ip = vpninfo->ip_info.addr,
+		.client_ipv6 = vpninfo->ip_info.addr6,
+		.client_os = gpst_os_name(vpninfo),
+		.app_version = vpninfo->csd_ticket,
+	};
+	char *report = NULL;
+	int ret;
+
+	vpn_progress(vpninfo, PRG_INFO, _("Requesting HIP report from application.\n"));
+	ret = vpninfo->hip_report_handler(vpninfo->cbdata, &req, &report);
+	if (ret || !report) {
+		vpn_progress(vpninfo, PRG_ERR,
+			     _("Application failed to provide a HIP report (%d)\n"), ret);
+		free(report);
+		/* Not -EPERM: that would mean the cookie was rejected. */
+		return (ret < 0 && ret != -EPERM) ? ret : -EINVAL;
+	}
+	vpn_progress(vpninfo, PRG_INFO,
+		     _("Application provided HIP report (%d bytes).\n"), (int)strlen(report));
+	ret = submit_hip_report(vpninfo, report);
+	free(report);
+	return ret;
+}
+
 static int run_hip_script(struct openconnect_info *vpninfo)
 {
 #if !defined(_WIN32) && !defined(__native_client__)
@@ -917,6 +958,9 @@ static int run_hip_script(struct openconnect_info *vpninfo)
 	int ret;
 	pid_t child;
 #endif
+
+	if (vpninfo->hip_report_handler)
+		return run_hip_handler(vpninfo);
 
 	if (!vpninfo->csd_wrapper) {
 		/* Only warn once */
@@ -988,13 +1032,7 @@ static int run_hip_script(struct openconnect_info *vpninfo)
 				     _("HIP script '%s' completed successfully (report is %d bytes).\n"),
 				     vpninfo->csd_wrapper, report_buf->pos);
 
-			ret = check_or_submit_hip_report(vpninfo, report_buf->data);
-			if (ret < 0)
-				vpn_progress(vpninfo, PRG_ERR, _("HIP report submission failed.\n"));
-			else {
-				vpn_progress(vpninfo, PRG_INFO, _("HIP report submitted successfully.\n"));
-				ret = 0;
-			}
+			ret = submit_hip_report(vpninfo, report_buf->data);
 		}
 		buf_free(report_buf);
 		return ret;

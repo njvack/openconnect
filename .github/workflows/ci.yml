@@ -54,3 +54,8 @@ jobs:
       # The macos branch carries the HIP-retry patch, so a failed HIP
       # recheck ending the session is a failure here, not a known issue.
       - run: sudo E2E_EXPECT_HIP_RETRY=1 gp-fake-gateway/e2e/run.sh "$PWD/openconnect" "$PWD/fakegp"
+      - name: HIP report handler (library callback) against the fake gateway
+        run: |
+          ./libtool --mode=link gcc -Wall -Werror -I. -o tests/macos/hip-handler-client \
+            tests/macos/hip-handler-client.c libopenconnect.la
+          tests/macos/hip-handler.sh "$PWD/tests/macos/hip-handler-client" "$PWD/fakegp"

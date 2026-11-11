@@ -804,6 +804,40 @@ typedef void (*openconnect_stats_vfn) (void *privdata, const struct oc_stats *st
 void openconnect_set_stats_handler(struct openconnect_info *vpninfo,
 				   openconnect_stats_vfn stats_handler);
 
+/* GlobalProtect HIP report from the application (njvack/openconnect macos
+ * branch; not in upstream OpenConnect).
+ *
+ * When the gateway asks for a HIP report, openconnect normally runs the
+ * --csd-wrapper script and submits what it prints. With a handler set, it
+ * calls the handler instead, even if a wrapper is also configured.
+ *
+ * The request holds what the script would get as arguments; the session
+ * cookie is available from openconnect_get_cookie(). Its strings are valid
+ * only during the call, and any of them except md5 and client_os may be
+ * NULL. Fields may be added at the end in later versions, so do not
+ * allocate this struct yourself.
+ *
+ * On success the handler returns 0 and sets *report to a NUL-terminated
+ * HIP report XML document allocated with malloc(); openconnect frees it.
+ * On failure it returns a negative errno value and the HIP check is
+ * treated as failed (and retried, if this was a periodic recheck).
+ */
+#define OPENCONNECT_HAS_HIP_REPORT_HANDLER 1
+
+struct oc_hip_report_request {
+	const char *md5;		/* --md5 */
+	const char *client_ip;		/* --client-ip */
+	const char *client_ipv6;	/* --client-ipv6 */
+	const char *client_os;		/* --client-os: Windows, Mac or Linux */
+	const char *app_version;	/* $APP_VERSION */
+};
+
+typedef int (*openconnect_hip_report_vfn) (void *privdata,
+					   const struct oc_hip_report_request *req,
+					   char **report);
+void openconnect_set_hip_report_handler(struct openconnect_info *vpninfo,
+					openconnect_hip_report_vfn handler);
+
 /* SSL certificate capabilities. openconnect_has_pkcs11_support() means that we
    can accept PKCS#11 URLs in place of filenames, for the certificate and key. */
 int openconnect_has_pkcs11_support(void);

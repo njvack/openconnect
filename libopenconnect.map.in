@@ -132,6 +132,13 @@ OPENCONNECT_5_9 {
 	openconnect_set_sni;
 } OPENCONNECT_5_8;
 
+/* njvack/openconnect macos branch only; deliberately not an
+ * OPENCONNECT_5_x node, so it can't collide with a future upstream one. */
+OPENCONNECT_MACOS_1 {
+ global:
+	openconnect_set_hip_report_handler;
+} OPENCONNECT_5_9;
+
 OPENCONNECT_PRIVATE {
  global: @SYMVER_TIME@ @SYMVER_GETLINE@ @SYMVER_JAVA@ @SYMVER_ASPRINTF@ @SYMVER_VASPRINTF@ @SYMVER_WIN32_STRERROR@ @SYMVER_WIN32_SETENV@
 	openconnect_get_tls_library_version;

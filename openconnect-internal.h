@@ -777,6 +777,7 @@ struct openconnect_info {
 	int max_qlen;
 	struct oc_stats stats;
 	openconnect_stats_vfn stats_handler;
+	openconnect_hip_report_vfn hip_report_handler;
 
 	socklen_t peer_addrlen;
 	struct sockaddr *peer_addr;
