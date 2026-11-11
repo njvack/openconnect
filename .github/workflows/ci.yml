@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [macos]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake libtool pkg-config gettext \
+            libxml2-dev libgnutls28-dev liblz4-dev iproute2 iputils-ping \
+            ocserv libsocket-wrapper libuid-wrapper libnss-wrapper \
+            python3-flask softhsm2 gnutls-bin
+      - run: ./autogen.sh
+      - run: ./configure --disable-nls --with-vpnc-script=/bin/true
+      - run: make -j"$(nproc)"
+      # These fail the same way on Ubuntu's ocserv and GnuTLS with or
+      # without our patches; upstream's CI XFAILs some of them too.
+      - run: >
+          make VERBOSE=1 -j"$(nproc)" check
+          XFAIL_TESTS="auth-nonascii auth-certificate auth-multicert obsolete-server-crypto ppp-over-tls-sync"
+
+  e2e:
+    # This build of openconnect against njvack/gp-fake-gateway over a real tun device.
+    # Only the fake's test subnet is routed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: njvack/gp-fake-gateway
+          ref: ${{ vars.GP_FAKE_GATEWAY_REF || 'main' }}
+          path: gp-fake-gateway
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: gp-fake-gateway/go.mod
+          cache: false
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake libtool pkg-config gettext \
+            libxml2-dev libgnutls28-dev liblz4-dev iproute2 iputils-ping
+      - run: ./autogen.sh
+      - run: ./configure --disable-nls --with-vpnc-script=/bin/true
+      - run: make -j"$(nproc)"
+      - run: go build -o "$GITHUB_WORKSPACE/fakegp" ./cmd/fakegp
+        working-directory: gp-fake-gateway
+      # The macos branch carries the HIP-retry patch, so a failed HIP
+      # recheck ending the session is a failure here, not a known issue.
+      - run: sudo E2E_EXPECT_HIP_RETRY=1 gp-fake-gateway/e2e/run.sh "$PWD/openconnect" "$PWD/fakegp"
