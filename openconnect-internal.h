@@ -526,6 +526,7 @@ struct openconnect_info {
 	char *csd_wrapper;
 	int trojan_interval;
 	time_t last_trojan;
+	int trojan_failures; /* consecutive failed HIP rechecks (GP) */
 	int no_http_keepalive;
 	int dump_http_traffic;
 
